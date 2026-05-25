@@ -2,6 +2,8 @@
 
 LibreTranslate API互換の翻訳サーバーです。[Hy-MT2](https://huggingface.co/collections/tencent/hy-mt2) などのLLMを翻訳エンジンとして使用し、MastodonなどLibreTranslate対応アプリから利用できます。
 
+ライセンス：AGPL-3.0
+
 ## 特徴
 
 - **LibreTranslate API互換** — Mastodonの翻訳機能をそのまま使用可能
