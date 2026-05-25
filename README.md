@@ -60,7 +60,16 @@ docker compose up -d
 
 ### 3. Mastodonで設定
 
-管理画面 → **翻訳** → **LibreTranslate** を選択し、サーバーURLに `http://<ホスト>:5000` を入力。
+管理画面 → **翻訳** → **LibreTranslate** を選択し、サーバーURLに `http://<ホスト>:5000` を入力（パスは不要）。
+
+`.env` または環境変数で設定する場合:
+
+```env
+LIBRE_TRANSLATE_ENDPOINT=http://<ホスト>:5000
+LIBRE_TRANSLATE_API_KEY=        # API_KEY を設定した場合はその値
+```
+
+> **Docker使用時の注意**: `docker-compose.yml` のデフォルト設定ではホスト側ポートが `5001` になるため、`http://<ホスト>:5001` を使用してください。
 
 ## 設定
 
