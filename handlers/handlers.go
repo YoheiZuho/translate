@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -20,41 +22,112 @@ func New(cfg *config.Config, client *llm.Client) *Handler {
 
 // POST /translate
 func (h *Handler) Translate(c *gin.Context) {
-	var req struct {
-		Q      string `form:"q" json:"q" binding:"required"`
-		Source string `form:"source" json:"source" binding:"required"`
-		Target string `form:"target" json:"target" binding:"required"`
-		Format string `form:"format" json:"format"`
-		APIKey string `form:"api_key" json:"api_key"`
-	}
-
-	if err := c.ShouldBind(&req); err != nil {
+	texts, source, target, apiKey, err := parseTranslateRequest(c)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if !h.isValidAPIKey(req.APIKey) {
+	if !h.isValidAPIKey(apiKey) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid API key"})
 		return
 	}
 
-	if !h.isValidTarget(req.Target) {
+	if !h.isValidTarget(target) {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "target language '" + req.Target + "' is not supported",
+			"error": "target language '" + target + "' is not supported",
 		})
 		return
 	}
 
-	sourceName := languageCodeToName(req.Source, h.cfg.Languages)
-	targetName := languageCodeToName(req.Target, h.cfg.Languages)
+	sourceName := languageCodeToName(source, h.cfg.Languages)
+	targetName := languageCodeToName(target, h.cfg.Languages)
 
-	translated, err := h.client.Translate(c.Request.Context(), req.Q, sourceName, targetName)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Translation failed: " + err.Error()})
-		return
+	translatedTexts := make([]string, 0, len(texts))
+	var detectedLanguages []gin.H
+
+	for _, text := range texts {
+		translated, err := h.client.Translate(c.Request.Context(), text, sourceName, targetName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Translation failed: " + err.Error()})
+			return
+		}
+		translatedTexts = append(translatedTexts, translated)
+
+		if source == "auto" {
+			code, confidence, err := h.client.DetectLanguage(c.Request.Context(), text)
+			if err != nil {
+				code = ""
+				confidence = 0
+			}
+			detectedLanguages = append(detectedLanguages, gin.H{
+				"language":   code,
+				"confidence": confidence,
+			})
+		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"translatedText": translated})
+	resp := gin.H{"translatedText": translatedTexts}
+	if detectedLanguages != nil {
+		resp["detectedLanguage"] = detectedLanguages
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func parseTranslateRequest(c *gin.Context) (texts []string, source, target, apiKey string, err error) {
+	if strings.Contains(c.ContentType(), "application/json") {
+		var body struct {
+			Q      json.RawMessage `json:"q"`
+			Source string          `json:"source"`
+			Target string          `json:"target"`
+			APIKey string          `json:"api_key"`
+		}
+		if err = c.ShouldBindJSON(&body); err != nil {
+			return
+		}
+		source, target, apiKey = body.Source, body.Target, body.APIKey
+		texts, err = parseQField(body.Q)
+	} else {
+		var form struct {
+			Q      string `form:"q" binding:"required"`
+			Source string `form:"source" binding:"required"`
+			Target string `form:"target" binding:"required"`
+			APIKey string `form:"api_key"`
+		}
+		if err = c.ShouldBind(&form); err != nil {
+			return
+		}
+		texts = []string{form.Q}
+		source, target, apiKey = form.Source, form.Target, form.APIKey
+	}
+	if err == nil && source == "" {
+		err = fmt.Errorf("source is required")
+	}
+	if err == nil && target == "" {
+		err = fmt.Errorf("target is required")
+	}
+	return
+}
+
+func parseQField(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("q is required")
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if s == "" {
+			return nil, fmt.Errorf("q cannot be empty")
+		}
+		return []string{s}, nil
+	}
+	var arr []string
+	if json.Unmarshal(raw, &arr) == nil {
+		if len(arr) == 0 {
+			return nil, fmt.Errorf("q cannot be empty")
+		}
+		return arr, nil
+	}
+	return nil, fmt.Errorf("q must be a string or array of strings")
 }
 
 // GET /languages
